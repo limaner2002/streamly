@@ -76,6 +76,8 @@ module Streamly.Prelude
     , fromHandle
     , toHandle
 
+    -- * Splitting
+    , Streamly.Prelude.splitAt
     )
 where
 
@@ -302,6 +304,18 @@ drop n m = fromStream $ go n (toStream m)
         in if n1 <= 0
            then (runStream m1) ctx stp yld
            else (runStream m1) ctx stp yield
+
+splitAt :: Streaming t => Int -> t m a -> t m a
+splitAt n m = fromStream $ go n (toStream m)
+  where
+    go :: Int -> Stream m a -> Stream m a
+    go n1 m1 = Stream $ \ctx stp yld ->
+      let yield a Nothing  = yld a Nothing
+          yield a (Just x) = yld a (Just $ go (n1 - 1) x)
+      -- I just have to figure out how to return and lazily evaluate these two parts after the if below
+      in if n1 <= 0
+         then (runStream m1) ctx stp yld   -- This would be the rest here. Does not recurse here
+         else (runStream m1) ctx stp yield -- This is the first part. Recursively calls go here
 
 -- | Drop elements in the stream as long as the predicate succeeds and then
 -- take the rest of the stream.
