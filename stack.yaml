@@ -1,29 +1,20 @@
-resolver: lts-11.0
+resolver: lts-12.11
 packages:
 - '.'
-#- location: ../bench-graph
-#  extra-dep: true
 extra-deps:
-    - simple-conduit-0.6.0
-    - SDL-0.6.5.1
-
-    - git: https://github.com/composewell/bench-graph
-      commit: b6d6c69f76c0d951aecd257866cede9467bd166d
-
-    - Chart-diagrams-1.8.3
+    - SDL-0.6.6.0
+    - gauge-0.2.4
+    - Chart-1.9
+    - Chart-diagrams-1.9
     - SVGFonts-1.6.0.3
-    - diagrams-core-1.4.0.1
-    - diagrams-lib-1.4.2
-    - diagrams-postscript-1.4
-    - diagrams-svg-1.4.1.1
-    - diagrams-solve-0.1.1
-    - dual-tree-0.2.1
-    - lens-4.15.4
-    - free-4.12.4
+    - bench-show-0.2.2
+    - statistics-0.15.0.0
+    - dense-linear-algebra-0.1.0.0
+    - math-functions-0.3.0.2
 
 flags: {}
 extra-package-dbs: []
 rebuild-ghc-options: true
 # For mac ports installed SDL library on Mac OS X
-#extra-include-dirs:
-#- /opt/local/include
+extra-include-dirs:
+- /opt/local/include

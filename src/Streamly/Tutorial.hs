@@ -6,59 +6,86 @@
 -- License     : BSD3
 -- Maintainer  : harendra.kumar@gmail.com
 --
--- Streamly, short for stream concurrently, combines the essence of
--- non-determinism, streaming and concurrency in functional programming.
--- Concurrent and non-concurrent applications are almost indistinguisable,
--- concurrency capability does not at all impact the performance of
--- non-concurrent case.
--- Streaming enables writing modular, composable and scalable applications with
--- ease and concurrency allows you to make them scale and perform well.
--- Streamly enables writing concurrent applications without being aware of
--- threads or synchronization. No explicit thread control is needed, where
--- applicable the concurrency rate is automatically controlled based on the
--- demand by the consumer. However, combinators are provided to fine tune the
--- concurrency control.
--- Streaming and concurrency together enable expressing reactive applications
--- conveniently. See "Streamly.Examples" for a simple SDL based FRP example.
+-- Streamly is a general computing framework based on streaming IO. The IO
+-- monad and pure lists are a special case of streamly. On one hand, streamly
+-- extends the lists of pure values to lists of monadic actions, on the other
+-- hand it extends the IO monad with concurrent non-determinism. In simple
+-- imperative terms we can say that streamly extends the IO monad with @for@
+-- loops and nested @for@ loops with concurrency support. You can understand
+-- this analogy better once you can go through this tutorial.
 --
--- Streamly streams are very much like the Haskell lists and most of the
--- functions that work on lists have a counterpart that works on streams.
--- However, streamly streams can be generated, consumed or combined
--- concurrently. In this tutorial we will go over the basic concepts and how to
--- use the library.  The documentation of @Streamly@ module has more details on
--- core APIs.  For more APIs for constructing, folding, filtering, mapping and
--- zipping etc. see the documentation of "Streamly.Prelude" module. For
--- examples and other ways to use the library see the module
--- "Streamly.Examples" as well.
+-- Streaming in general enables writing modular, composable and scalable
+-- applications with ease, and concurrency allows you to make them scale and
+-- perform well.  Streamly enables writing scalable concurrent applications
+-- without being aware of threads or synchronization. No explicit thread
+-- control is needed, where applicable the concurrency rate is automatically
+-- controlled based on the demand by the consumer. However, combinators can be
+-- used to fine tune the concurrency control.
+--
+-- Streaming and concurrency together enable expressing reactive applications
+-- conveniently. See the @CirclingSquare@ example in the examples directory for
+-- a simple SDL based FRP example. To summarize, streamly provides a unified
+-- computing framework for streaming, non-determinism and functional reactive
+-- programming in an elegant and simple API that is a natural extension of pure
+-- lists to monadic streams.
+--
+-- In this tutorial we will go over the basic concepts and how to
+-- use the library. See the last section for further reading resources.
 
 module Streamly.Tutorial
     (
     -- * Streams
     -- $streams
 
-    -- ** Generating Streams
-    -- $generating
-
-    -- ** Eliminating Streams
-    -- $eliminating
+    -- * Concurrent Streams
+    -- $concurrentStreams
 
     -- * Combining Streams
-    -- $combining
+    -- $flavors
+
+    -- * Imports and Supporting Code
+    -- $imports
+
+    -- * Generating Streams
+    -- $generating
+
+    -- * Generating Streams Concurrently
+    -- $generatingConcurrently
+
+    -- * Eliminating Streams
+    -- $eliminating
+
+    -- * Concurrent Pipeline Stages
+    -- $concurrentApplication
+
+    -- * Transforming Streams
+    -- $transformation
+
+    -- * Mapping Concurrently
+    -- $concurrentTransformation
+
+    -- * Merging Streams
 
     -- ** Semigroup Style
     -- $semigroup
 
-    -- *** Serial composition ('<>')
+    -- *** Deep Serial Composition ('Serial')
     -- $serial
 
-    -- *** Async composition ('<|')
-    -- $parallel
-
-    -- *** Interleaved composition ('<=>')
+    -- *** Wide Serial Composition ('WSerial')
     -- $interleaved
 
-    -- *** Fair Concurrent composition ('<|>')
-    -- $fairParallel
+    -- *** Deep Ahead Composition ('Ahead')
+    -- $ahead
+
+    -- *** Deep Asynchronous Composition ('Async')
+    -- $async
+
+    -- *** Wide Asynchronous Composition ('WAsync')
+    -- $wasync
+
+    -- *** Parallel Asynchronous Composition ('Parallel')
+    -- $parallel
 
     -- *** Custom composition
     -- $custom
@@ -66,23 +93,29 @@ module Streamly.Tutorial
     -- ** Monoid Style
     -- $monoid
 
-    -- * Transforming Streams
-    -- $transforming
+    -- * Nesting Streams
+    -- $nesting
 
     -- ** Monad
     -- $monad
 
-    -- *** Serial Composition ('StreamT')
+    -- *** Deep Serial Nesting ('Serial')
     -- $regularSerial
 
-    -- *** Async Composition ('AsyncT')
-    -- $concurrentNesting
-
-    -- *** Interleaved Composition ('InterleavedT')
+    -- *** Wide Serial Nesting ('WSerial')
     -- $interleavedNesting
 
-    -- *** Fair Concurrent Composition ('ParallelT')
-    -- $fairlyConcurrentNesting
+    -- *** Deep Ahead Nesting ('Ahead')
+    -- $aheadNesting
+
+    -- *** Deep Asynchronous Nesting ('Async')
+    -- $concurrentNesting
+
+    -- *** Wide Asynchronous Nesting ('WAsync')
+    -- $wasyncNesting
+
+    -- *** Parallel Asynchronous Nesting ('Parallel')
+    -- $parallelNesting
 
     -- *** Exercise
     -- $monadExercise
@@ -102,14 +135,17 @@ module Streamly.Tutorial
     -- ** Parallel Zipping
     -- $parallelzip
 
-    -- * Summary of Compositions
-    -- $compositionSummary
+    -- * Monad transformers
+    -- $monadtransformers
 
     -- * Concurrent Programming
     -- $concurrent
 
     -- * Reactive Programming
     -- $reactive
+
+    -- * Writing Concurrent Programs
+    -- $programs
 
     -- * Performance
     -- $performance
@@ -119,6 +155,9 @@ module Streamly.Tutorial
 
     -- * Comparison with Existing Packages
     -- $comparison
+
+    -- * Where to go next?
+    -- $furtherReading
     )
 where
 
@@ -132,80 +171,354 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 
 -- $streams
 --
--- Streamly provides many different stream types depending on the desired
--- composition style. The simplest type is 'StreamT'. 'StreamT' is a monad
--- transformer, the type @StreamT m a@ represents a stream of values of type
--- 'a' in some underlying monad 'm'. For example, @StreamT IO Int@ is a stream
--- of 'Int' in 'IO' monad.
+-- The way a list represents a sequence of pure values, a stream represents a
+-- sequence of monadic actions. The monadic stream API offered by Streamly is
+-- very close to the Haskell "Prelude" pure lists' API, it can be considered as a
+-- natural extension of lists to monadic actions. Streamly streams provide
+-- concurrent composition and merging of streams. It can be considered as a
+-- concurrent list transformer. In contrast to the "Prelude" lists, merging or
+-- appending streams of arbitrary length is scalable and inexpensive.
+--
+-- The basic stream type is 'Serial', it represents a sequence of IO actions,
+-- and is a 'Monad'.  The 'Serial' monad is almost a drop in replacement for
+-- the 'IO' monad, IO monad is a special case of the 'Serial' monad; IO monad
+-- represents a single IO action whereas the 'Serial' monad represents a series
+-- of IO actions.  The only change you need to make to go from 'IO' to 'Serial'
+-- is to use 'runStream' to run the monad and to prefix the IO actions with
+-- either 'yieldM' or 'liftIO'.  If you use liftIO you can switch from 'Serial'
+-- to IO monad by simply removing the 'runStream' function; no other changes
+-- are needed unless you have used some stream specific composition or
+-- combinators.
+--
+-- Similarly, the 'Serial' type is almost a drop in replacement for pure lists,
+-- pure lists are a special case of monadic streams. If you use 'nil' in place
+-- of '[]' and '|:' in place ':' you can replace a list with a 'Serial' stream.
+-- The only difference is that the elements must be monadic type and to operate
+-- on the streams we must use the corresponding functions from
+-- "Streamly.Prelude" instead of using the base "Prelude".
+
+-- $concurrentStreams
+--
+-- Many stream operations can be done concurrently:
+--
+-- * Streams can be generated concurrently.
+--
+-- * Streams can be merged concurrently.
+--
+-- * Multiple stages in a streaming pipeline can run concurrently.
+--
+-- * Streams can be mapped and zipped concurrently.
+--
+-- * In monadic composition they combine like a list transformer,
+--   providing concurrent non-determinism.
+--
+-- There are three basic concurrent stream styles, 'Ahead', 'Async', and
+-- 'Parallel'. The 'Ahead' style streams are similar to 'Serial' except that
+-- they can speculatively execute multiple stream actions concurrently in
+-- advance. 'Ahead' would return exactly the same stream as 'Serial' except
+-- that it may execute the actions concurrently. The 'Async' style streams,
+-- like 'Ahead', speculatively execute multiple stream actions in advance but
+-- return the results in their finishing order rather than in the stream
+-- traversal order.  'Parallel' is like 'Async' except that it provides
+-- unbounded parallelism instead of controlled parallelism.
+--
+-- For easy reference, we can classify the stream types based on /execution order/,
+-- /consumption order/, and /bounded or unbounded/ concurrency.
+-- Execution could be serial (i.e. synchronous) or asynchronous. In serial
+-- execution we execute the next action in the stream only after the previous
+-- one has finished executing. In asynchronous execution multiple actions in
+-- the stream can be executed asynchronously i.e. the next action can start
+-- executing even before the first one has finished. Consumption order
+-- determines the order in which the outputs generated by the composition are
+-- consumed.  Consumption could be serial or asynchronous. In serial
+-- consumption, the outputs are consumed in the traversal order, in
+-- asynchronous consumption the outputs are consumed as they arrive i.e. first
+-- come first serve order.
+--
+-- +------------+--------------+--------------+--------------+
+-- | Type       | Execution    | Consumption  | Concurrency  |
+-- +============+==============+==============+==============+
+-- | 'Serial'   | Serial       | Serial       | None         |
+-- +------------+--------------+--------------+--------------+
+-- | 'Ahead'    | Asynchronous | Serial       | bounded      |
+-- +------------+--------------+--------------+--------------+
+-- | 'Async'    | Asynchronous | Asynchronous | bounded      |
+-- +------------+--------------+--------------+--------------+
+-- | 'Parallel' | Asynchronous | Asynchronous | unbounded    |
+-- +------------+--------------+--------------+--------------+
+--
+-- All these types can be freely inter-converted using type conversion
+-- combinators or type annotations, without any cost, to achieve the desired
+-- composition style.  To force a particular type of composition, we coerce the
+-- stream type using the corresponding type adapting combinator from
+-- 'serially', 'aheadly', 'asyncly', or 'parallely'.  The default stream type
+-- is inferred as 'Serial' unless you change it by using one of the combinators
+-- or by using a type annotation.
+
+-- $flavors
+--
+-- Streams can be combined using '<>' or 'mappend' to form a
+-- composite. Composite streams can be interpreted in a depth first or
+-- breadth first manner using an appropriate type conversion before
+-- consumption. Deep (e.g. 'Serial') stream type variants traverse a
+-- composite stream in a depth first manner, such that each stream is
+-- traversed fully before traversing the next stream. Wide
+-- (e.g. 'WSerial') stream types traverse it in a breadth first
+-- manner, such that one element from each stream is traversed before
+-- coming back to the first stream again.
+--
+-- Each stream type has a wide traversal variant prefixed by 'W'. The wide
+-- variant differs only in the Semigroup\/Monoid, Applicative\/Monad
+-- compositions of the streams.
+-- The following table summarizes the basic types and the corresponding wide
+-- variants:
+--
+-- @
+-- +------------+-----------+
+-- | Deep       | Wide      |
+-- +============+===========+
+-- | 'Serial'     | 'WSerial'   |
+-- +------------+-----------+
+-- | 'Ahead'      | 'WAhead'    |
+-- +------------+-----------+
+-- | 'Async'      | 'WAsync'    |
+-- +------------+-----------+
+-- @
+--
+-- Other than these types there are also 'ZipSerial' and 'ZipAsync' types that
+-- zip streams serially or concurrently using 'Applicative' operation. These
+-- types are not monads they are only applicatives and they do not differ in
+-- 'Semigroup' composition.
+--
+
+-- $programs
+--
+-- When writing concurrent programs it is advised to not use the concurrent
+-- style stream combinators blindly at the top level. That might create too
+-- much concurrency where it is not even required, and can even degrade
+-- performance in some cases. In some cases it can also lead to surprising
+-- behavior because of some code that is supposed to be serial becoming
+-- concurrent. Please be aware that all concurrency capable APIs that you may
+-- have used under the scope of a concurrent stream combinator will become
+-- concurrent. For example if you have a 'repeatM' somewhere in your program
+-- and you use 'parallely' on top, the 'repeatM' becomes fully parallel,
+-- resulting into an infinite parallel execution . Instead, use the
+-- /Keep It Serial and Stupid/ principle, start with the default serial
+-- composition and enable concurrent combinators only when and where necessary.
+-- When you use a concurrent combinator you can use an explicit 'serially'
+-- combinator to suppress any unnecessary concurrency under the scope of that
+-- combinator.
+
+-- $monadtransformers
+--
+-- To represent streams in an arbitrary monad use the more general monad
+-- transformer types for example the monad transformer type corresponding to
+-- the 'Serial' type is 'SerialT'.  @SerialT m a@ represents a stream of values
+-- of type 'a' in some underlying monad 'm'. For example, @SerialT IO Int@ is a
+-- stream of 'Int' in 'IO' monad.  In fact, the type 'Serial' is a synonym for
+-- @SerialT IO@.
+--
+-- Similarly we have monad transformer types for other stream types as well viz.
+-- 'WSerialT', 'AsyncT', 'WAsyncT' and 'ParallelT'.
+--
+-- To lift a value from an underlying monad in a monad transformer stack into a
+-- singleton stream use 'lift' and to lift from an IO action use 'liftIO'.
+--
+-- @
+-- > 'runStream' $ liftIO $ putStrLn "Hello world!"
+-- Hello world!
+-- > 'runStream' $ lift $ putStrLn "Hello world!"
+-- Hello world!
+-- @
+--
 
 -- $generating
 --
--- Pure values can be placed into the stream type using 'return' or 'pure'.
--- Effects in the IO monad can be lifted to the stream type using the 'liftIO'
--- combinator. In a transformer stack we can lift actions from the lower monad
--- using the 'lift' combinator. Some examples of streams with a single element:
+-- We will assume the following imports in this tutorial. Go ahead, fire up a
+-- GHCi session and import these lines to start playing.
 --
 -- @
---  return 1 :: 'StreamT' IO Int
--- @
--- @
---  liftIO $ putStrLn "Hello world!" :: 'StreamT' IO ()
--- @
---
--- We can combine streams using '<>' to create streams of many elements:
---
--- @
---  return 1 <> return 2 <> return 3 :: 'StreamT' IO Int
+-- > import "Streamly"
+-- > import "Streamly.Prelude" ((|:))
+-- > import qualified "Streamly.Prelude" as S
 -- @
 --
--- For more ways to construct or generate a stream see the module
--- "Streamly.Prelude".
+-- 'nil' represents an empty stream and 'consM' or its operator form '|:' adds
+-- a monadic action at the head of the stream.
+--
+-- @
+-- > S.'toList' S.'nil'
+-- []
+-- > S.'toList' $ 'getLine' |: 'getLine' |: S.'nil'
+-- hello
+-- world
+-- ["hello","world"]
+-- @
+--
+-- To create a singleton stream from a pure value use 'yield' or 'pure' and to
+-- create a singleton stream from a monadic action use 'yieldM'. Note that in
+-- case of Zip applicative streams "pure" repeats the value to generate an
+-- infinite stream.
+--
+-- @
+-- > S.'toList' $ 'pure' 1
+-- [1]
+-- > S.'toList' $ 'yield' 1
+-- [1]
+-- > S.'toList' $ S.'yieldM' 'getLine'
+-- hello
+-- ["hello"]
+-- @
+--
+-- To create a stream from pure values in a 'Foldable' container use
+-- 'fromFoldable' which is equivalent to a fold using 'cons' and 'nil':
+--
+-- @
+-- > S.'toList' $ S.'fromFoldable' [1..3]
+-- [1,2,3]
+-- > S.'toList' $ 'Prelude.foldr' S.'cons' S.'nil' [1..3]
+-- [1,2,3]
+-- @
+--
+-- To create a stream from monadic actions in a 'Foldable' container just use a
+-- right fold using 'consM' and 'nil':
+--
+-- @
+-- > 'runStream' $ 'Prelude.foldr' ('|:') S.'nil' ['putStr' "Hello ", 'putStrLn' "world!"]
+-- Hello world!
+-- @
+--
+-- For more ways to construct a stream see the module "Streamly.Prelude".
+
+-- $generatingConcurrently
+--
+-- Monadic construction and generation functions like 'consM', 'unfoldrM',
+-- 'replicateM', 'repeatM', 'iterateM' and 'fromFoldableM' work concurrently
+-- when used with appropriate stream type combinator. The pure versions of
+-- these APIs are not concurrent, however you can use the monadic versions even
+-- for pure computations by wrapping the pure value in a monad to get the
+-- concurrent generation capability where required.
+--
+-- The following code finishes in 3 seconds (6 seconds when serial):
+--
+-- @
+-- > let p n = threadDelay (n * 1000000) >> return n
+-- > S.'toList' $ 'parallely' $ p 3 |: p 2 |: p 1 |: S.'nil'
+-- [1,2,3]
+-- > S.'toList' $ 'aheadly' $ p 3 |: p 2 |: p 1 |: S.'nil'
+-- [3,2,1]
+-- @
+-- The following finishes in 10 seconds (100 seconds when serial):
+--
+-- @
+-- > 'runStream' $ 'asyncly' $ S.'replicateM' 10 $ p 10
+-- @
+--
 
 -- $eliminating
 --
--- 'runStreamT' runs a composed 'StreamT' computation, lowering the type into
--- the underlying monad and discarding the result stream:
+-- We have already seen 'runStream' and 'toList' to eliminate a stream in the
+-- examples above.  'runStream' runs a stream discarding the results i.e. only
+-- for effects.  'toList' runs the stream and collects the results in a list.
+--
+-- For other ways to eliminate a stream see the @Folding@ section in
+-- "Streamly.Prelude" module.
+
+-- $transformation
+--
+-- Transformation over a stream is the equivalent of a @for@ loop construct in
+-- imperative paradigm. We iterate over every element in the stream and perform
+-- certain transformations for each element.  Transformations may involve
+-- mapping functions over the elements, filtering elements from the stream or
+-- folding all the elements in the stream into a single value. Streamly streams
+-- are exactly like lists and you can perform all the transformations in the
+-- same way as you would on lists.
+--
+-- Here is a simple console echo program that just echoes every input line,
+-- forever:
+--
+-- @
+-- > 'runStream' $ S.'repeatM' getLine & S.'mapM' putStrLn
+-- @
+--
+-- The following code snippet reads lines from standard input, filters blank
+-- lines, drops the first non-blank line, takes the next two, up cases them,
+-- numbers them and prints them:
 --
 -- @
 -- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
+-- import Data.Char (toUpper)
+-- import Data.Function ((&))
 --
--- main = 'runStreamT' $ liftIO $ putStrLn "Hello world!"
+-- main = 'runStream' $
+--        S.'repeatM' getLine
+--      & S.'filter' (not . null)
+--      & S.'drop' 1
+--      & S.'take' 2
+--      & fmap (map toUpper)
+--      & S.'zipWith' (\\n s -> show n ++ " " ++ s) (S.'fromFoldable' [1..])
+--      & S.'mapM' putStrLn
+-- @
+
+-- $concurrentTransformation
+--
+-- Monadic transformation functions 'mapM' and 'sequence' work concurrently
+-- when used with appropriate stream type combinators. The pure versions do not
+-- work concurrently, however you can use the monadic versions even for pure
+-- computations to get the concurrent transformation capability where required.
+--
+-- This would print a value every second (2 seconds when serial):
+--
+-- @
+-- > let p n = threadDelay (n * 1000000) >> return n
+-- > runStream $ aheadly $ S.'mapM' (\\x -> p 1 >> print x) (serially $ repeatM (p 1))
 -- @
 --
--- 'toList' runs a stream computation and collects the result stream in a list
--- in the underlying monad.  'toList' is a polymorphic function that works on
--- multiple stream types belonging to the class 'Streaming'. Therefore, before
--- you run a stream you need to tell how you want to interpret the stream by
--- using one of the stream type combinators ('serially', 'asyncly', 'parallely'
--- etc.). The combinator 'serially' is equivalent to annotating the type as @::
--- StreamT@.
+
+-- $concurrentApplication
+--
+-- The concurrent function application operators '|$' and '|&' apply a stream
+-- argument to a stream function concurrently to compose a concurrent pipeline
+-- of stream processing functions:
+--
+-- Because both the stages run concurrently, we would see a delay of only 1
+-- second instead of 2 seconds in the following:
 --
 -- @
--- import "Streamly"
--- import "Streamly.Prelude"
---
--- main = do
---  xs \<- 'toList' $ 'serially' $ return 1 <> return 2
---  print xs
+-- > let p n = threadDelay (n * 1000000) >> return n
+-- > runStream $ S.'repeatM' (p 1) '|&' S.'mapM' (\\x -> p 1 >> print x)
 -- @
---
--- For other ways to eliminate or fold a stream see the module
--- "Streamly.Prelude".
 
 -- $semigroup
--- Streams of the same type can be combined into a composite stream in many
--- different ways using one of the semigroup style binary composition operators
--- i.e. '<>', '<=>', '<|', '<|>', 'mplus'. These operators work on all stream
--- types ('StreamT', 'AsyncT' etc.) uniformly.
 --
--- To illustrate the concurrent aspects, we will use the following @delay@
--- function to introduce a delay specified in seconds.
+-- We can combine two streams into a single stream using semigroup composition
+-- operation '<>'.  Streams can be combined in many different ways as described
+-- in the following sections, the '<>' operation behaves differently depending
+-- on the stream type in effect. The stream type and therefore the composition
+-- style can be changed at any point using one of the type combinators as
+-- discussed earlier.
+
+-- $imports
+--
+-- In most of example snippets we do not repeat the imports. Where imports are
+-- not explicitly specified use the imports shown below.
 --
 -- @
 -- import "Streamly"
--- import Control.Concurrent
+-- import "Streamly.Prelude" ((|:), nil)
+-- import qualified "Streamly.Prelude" as S
 --
--- delay n = liftIO $ do
+-- import Control.Concurrent
+-- import Control.Monad (forever)
+-- @
+--
+-- To illustrate concurrent vs serial composition aspects, we will use the
+-- following @delay@ function to introduce a sleep or delay specified in
+-- seconds. After the delay it prints the number of seconds it slept.
+--
+-- @
+-- delay n = S.'yieldM' $ do
 --  threadDelay (n * 1000000)
 --  tid \<- myThreadId
 --  putStrLn (show tid ++ ": Delay " ++ show n)
@@ -213,63 +526,24 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 
 -- $serial
 --
--- We have already seen, the '<>' operator. It composes two streams in series
--- i.e. the first stream is completely exhausted and then the second stream is
--- processed.  The following example prints the sequence 3, 2, 1 and takes a
--- total of 6 seconds because everything is serial:
+-- The 'Semigroup' operation '<>' of the 'Serial' type combines the two streams
+-- in a /serial depth first/ manner. We use the 'serially' type combinator to
+-- effect 'Serial' style of composition. We can also use an explicit 'Serial'
+-- type annotation for the stream to achieve the same effect.  However, since
+-- 'Serial' is the default type unless explicitly specified by using a
+-- combinator, we can omit using an explicit combinator or type annotation for
+-- this style of composition.
+--
+-- When two streams with multiple elements are combined in this manner, the
+-- monadic actions in the two streams are performed sequentially i.e. first all
+-- actions in the first stream are performed sequentially and then all actions
+-- in the second stream are performed sequentially. We call it
+-- /serial depth first/ as the full depth of one stream is fully traversed
+-- before we move to the next. The following example prints the sequence 1, 2,
+-- 3, 4:
 --
 -- @
--- main = 'runStreamT' $ delay 3 <> delay 2 <> delay 1
--- @
--- @
--- ThreadId 36: Delay 3
--- ThreadId 36: Delay 2
--- ThreadId 36: Delay 1
--- @
-
--- $interleaved
--- The '<=>' operator is serial like '<>' but it interleaves the two streams
--- i.e. it yields one element from the first stream and then one element from
--- the second stream, and so on.  The following example prints the sequence 1,
--- 3, 2, 4 and takes a total of 10 seconds because everything is serial:
---
--- @
--- main = 'runStreamT' $ (delay 1 <> delay 2) '<=>' (delay 3 <> delay 4)
--- @
--- @
--- ThreadId 36: Delay 1
--- ThreadId 36: Delay 3
--- ThreadId 36: Delay 2
--- ThreadId 36: Delay 4
--- @
---
--- Note that this operator cannot be used to fold infinite containers since it
--- requires preserving the state until a stream is finished. To be clear, it
--- can combine infinite streams but not infinite number of streams.
-
--- $parallel
---
--- The '<|' operator can run both computations concurrently, /when needed/.
--- In the following example since the first computation blocks we start the
--- next one in a separate thread and so on:
---
--- @
--- main = 'runStreamT' $ delay 3 '<|' delay 2 '<|' delay 1
--- @
--- @
--- ThreadId 42: Delay 1
--- ThreadId 41: Delay 2
--- ThreadId 40: Delay 3
--- @
---
--- This is the concurrent version of the '<>' operator. The computations are
--- triggered in the same order as '<>' except that they are concurrent.  When
--- we have a tree of computations composed using this operator, the tree is
--- traversed in DFS style just like '<>'.
---
--- @
--- main = 'runStreamT' $ (p 1 '<|' p 2) '<|' (p 3 '<|' p 4)
---  where p = liftIO . print
+-- main = 'runStream' $ (print 1 |: print 2 |: nil) <> (print 3 |: print 4 |: nil)
 -- @
 -- @
 -- 1
@@ -278,145 +552,434 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- 4
 -- @
 --
--- Concurrency provided by this operator is demand driven. The second
--- computation is run concurrently with the first only if the first computation
--- is not producing enough output to keep the stream consumer busy otherwise
--- the second computation is run serially after the previous one. The number of
--- concurrent threads is adapted dynamically based on the pull rate of the
--- consumer of the stream.
--- As you can see, in the following example the computations are run in a
--- single thread one after another, because none of them blocks. However, if
--- the thread consuming the stream were faster than the producer then it would
--- have started parallel threads for each computation to keep up even if none
--- of them blocks:
+-- All actions in both the streams are performed serially in the same thread.
+-- In the following example we can see that all actions are performed in the
+-- same thread and take a combined total of @3 + 2 + 1 = 6@ seconds:
 --
 -- @
--- main = 'runStreamT' $ traced (sqrt 9) '<|' traced (sqrt 16) '<|' traced (sqrt 25)
---  where traced m = liftIO (myThreadId >>= print) >> m
+-- main = 'runStream' $ delay 3 <> delay 2 <> delay 1
+-- @
+-- @
+-- ThreadId 36: Delay 3
+-- ThreadId 36: Delay 2
+-- ThreadId 36: Delay 1
+-- @
+--
+-- The polymorphic version of the binary operation '<>' of the 'Serial' type is
+-- 'serial'. We can use 'serial' to join streams in a sequential manner
+-- irrespective of the type of stream:
+--
+-- @
+-- main = 'runStream' $ (print 1 |: print 2 |: nil) \`serial` (print 3 |: print 4 |: nil)
+-- @
+
+-- $interleaved
+--
+-- The 'Semigroup' operation '<>' of the 'WSerial' type combines the two
+-- streams in a /serial breadth first/ manner. We use the 'wSerially' type
+-- combinator to effect 'WSerial' style of composition. We can also use the
+-- 'WSerial' type annotation for the stream to achieve the same effect.
+--
+-- When two streams with multiple elements are combined in this manner, we
+-- traverse all the streams in a breadth first manner i.e. one action from each
+-- stream is performed and yielded to the resulting stream before we come back
+-- to the first stream again and so on.
+-- The following example prints the sequence 1, 3, 2, 4
+--
+-- @
+-- main = 'runStream' . 'wSerially' $ (print 1 |: print 2 |: nil) <> (print 3 |: print 4 |: nil)
+-- @
+-- @
+-- 1
+-- 3
+-- 2
+-- 4
+-- @
+--
+-- Even though the monadic actions of the two streams are performed in an
+-- interleaved manner they are all performed serially in the same thread. In
+-- the following example we can see that all actions are performed in the same
+-- thread and take a combined total of @3 + 2 + 1 = 6@ seconds:
+--
+-- @
+-- main = 'runStream' . 'wSerially' $ delay 3 <> delay 2 <> delay 1
+-- @
+-- @
+-- ThreadId 36: Delay 3
+-- ThreadId 36: Delay 2
+-- ThreadId 36: Delay 1
+-- @
+--
+-- The polymorphic version of the 'WSerial' binary operation '<>' is called
+-- 'wSerial'. We can use 'wSerial' to join streams in an interleaved manner
+-- irrespective of the type, notice that we have not used the 'wSerially'
+-- combinator in the following example:
+--
+-- @
+-- main = 'runStream' $ (print 1 |: print 2 |: nil) \`wSerial` (print 3 |: print 4 |: nil)
+-- @
+-- @
+-- 1
+-- 3
+-- 2
+-- 4
+-- @
+--
+-- Note that this composition cannot be used to fold infinite number of streams
+-- since it requires preserving the state until a stream is finished.
+
+-- $ahead
+--
+-- The 'Semigroup' operation '<>' of the 'Ahead' type combines two streams in a
+-- /serial depth first/ manner with concurrent lookahead. We use the 'aheadly'
+-- type combinator to effect 'Ahead' style of composition. We can also use an
+-- explicit 'Ahead' type annotation for the stream to achieve the same effect.
+--
+-- When two streams are combined in this manner, the streams are traversed in
+-- depth first manner just like 'Serial', however it can execute the next
+-- stream concurrently and keep the results ready when its turn arrives.
+-- Concurrent execution of the next stream(s) is performed if the first stream
+-- blocks or if it cannot produce output at the rate that is enough to meet the
+-- consumer demand. Multiple streams can be executed concurrently to meet the
+-- demand.  The following example would print the result in a second even
+-- though each action in each stream takes one second:
+--
+-- @
+-- main = do
+--  xs \<- 'toList' . 'aheadly' $ (p 1 |: p 2 |: nil) <> (p 3 |: p 4 |: nil)
+--  print xs
+--  where p n = threadDelay 1000000 >> return n
+-- @
+-- @
+-- [1,2,3,4]
+-- @
+--
+-- Each stream is constructed 'aheadly' and then both the streams are merged
+-- 'aheadly', therefore, all the actions can run concurrently but the result is
+-- presented in serial order.
+--
+-- You can also use the polymorphic combinator 'ahead' in place of '<>' to
+-- compose any type of streams in this manner.
+
+-- $async
+--
+-- The 'Semigroup' operation '<>' of the 'Async' type combines the two
+-- streams in a depth first manner with parallel look ahead. We use the
+-- 'asyncly' type combinator to effect 'Async' style of composition. We
+-- can also use the 'Async' type annotation for the stream type to achieve
+-- the same effect.
+--
+-- When two streams with multiple elements are combined in this manner, the
+-- streams are traversed in depth first manner just like 'Serial', however it
+-- can execute the next stream concurrently and return the results from it
+-- as they arrive i.e. the results from the next stream may be yielded even
+-- before the results from the first stream. Concurrent execution of the next
+-- stream(s) is performed if the first stream blocks or if it cannot produce
+-- output at the rate that is enough to meet the consumer demand. Multiple
+-- streams can be executed concurrently to meet the demand.
+-- In the example below each element in the stream introduces a constant delay
+-- of 1 second, however, it takes just one second to produce all the results.
+-- The results are not guaranteed to be in any particular order:
+--
+-- @
+-- main = do
+--   xs \<- 'runStream' . 'asyncly' $ (p 1 |: p 2 |: nil) <> (p 3 |: p 4 |: nil)
+--   print xs
+--   where p n = threadDelay 1000000 >> return n
+-- @
+-- @
+-- [4,2,1,3]
+-- @
+--
+-- The constituent streams are also composed in 'Async' manner and the
+-- composition of streams too. We can compose the constituent streams to run
+-- serially, in that case it would take 2 seconds to produce all the results.
+-- The elements in the serial streams would be in serial order in the results:
+--
+-- @
+-- main = do
+--   xs \<- 'runStream' . 'asyncly' $ (serially $ p 1 |: p 2 |: nil) <> (serially $ p 3 |: p 4 |: nil)
+--   print xs
+--   where p n = threadDelay 1000000 >> return n
+-- @
+-- @
+-- [3,1,2,4]
+-- @
+--
+-- In the following example we can see that new threads are started when a
+-- computation blocks.  Notice that the output from the stream with the
+-- shortest delay is printed first. The whole computation takes @maximum of
+-- (3, 2, 1) = 3@ seconds:
+--
+-- @
+-- main = 'runStream' . 'asyncly' $ delay 3 '<>' delay 2 '<>' delay 1
+-- @
+-- @
+-- ThreadId 42: Delay 1
+-- ThreadId 41: Delay 2
+-- ThreadId 40: Delay 3
+-- @
+--
+-- When we have a tree of computations composed using this style, the tree is
+-- traversed in DFS style just like the 'Serial' style, the only difference is
+-- that here we can move on to executing the next stream if a stream blocks.
+-- However, we will not start new threads if we have sufficient output to
+-- saturate the consumer.  This is why we call it left-biased demand driven or
+-- adaptive concurrency style, the concurrency tends to stay on the left side
+-- of the composition as long as possible. More threads are started based on
+-- the pull rate of the consumer. The following example prints an output every
+-- second as all of the actions are concurrent.
+--
+-- @
+-- main = 'runStream' . 'asyncly' $ (delay 1 <> delay 2) <> (delay 3 <> delay 4)
+-- @
+-- @
+-- 1
+-- 2
+-- 3
+-- 4
+-- @
+--
+-- All the computations may even run in a single thread when more threads are
+-- not needed. As you can see, in the following example the computations are
+-- run in a single thread one after another, because none of them blocks.
+-- However, if the thread consuming the stream were faster than the producer
+-- then it would have started parallel threads for each computation to keep up
+-- even if none of them blocks:
+--
+-- @
+-- main = 'runStream' . 'asyncly' $ traced (sqrt 9) '<>' traced (sqrt 16) '<>' traced (sqrt 25)
+--  where traced m = S.'yieldM' (myThreadId >>= print) >> return m
 -- @
 -- @
 -- ThreadId 40
 -- ThreadId 40
 -- ThreadId 40
+-- @
+--
+-- Note that the order of printing in the above examples may change due to
+-- variations in scheduling latencies for concurrent threads.
+--
+-- The polymorphic version of the 'Async' binary operation '<>' is called
+-- 'async'. We can use 'async' to join streams in a left biased
+-- adaptively concurrent manner irrespective of the type, notice that we have
+-- not used the 'asyncly' combinator in the following example:
+--
+-- @
+-- main = 'runStream' $ delay 3 \`async` delay 2 \`async` delay 1
+-- @
+-- @
+-- ThreadId 42: Delay 1
+-- ThreadId 41: Delay 2
+-- ThreadId 40: Delay 3
 -- @
 --
 -- Since the concurrency provided by this operator is demand driven it cannot
--- be used when the composed computations have timers that are relative to each
--- other because all computations may not be started at the same time and
+-- be used when the composed computations start timers that are relative to
+-- each other because all computations may not be started at the same time and
 -- therefore timers in all of them may not start at the same time.  When
 -- relative timing among all computations is important or when we need to start
--- all computations at once for some reason '<|>' must be used instead.
--- However, '<|' is useful in situations when we want to optimally utilize the
--- resources and we know that the computations can run in parallel but we do
--- not care if they actually run in parallel or not, that decision is left to
--- the scheduler. Also, note that this operator can be used to fold infinite
--- containers in contrast to '<|>', because it does not require us to run all
--- of them at the same time.
+-- all computations at once for any reason 'Parallel' style must be used
+-- instead.
 --
--- The left bias (or the DFS style) of the operator '<|' is suggested by its
--- shape.  You can also think of this as an unbalanced version of the fairly
--- parallel operator '<|>'.
+-- 'Async' style should be preferred over 'Parallel' or 'WAsync' unless you
+-- really need those. It utilizes the resources optimally. It should be used
+-- when we know that the computations can run in parallel but we do not care if
+-- they actually run in parallel or not, that decision can be left to the
+-- scheduler based on demand. Also, note that this operator can be used to fold
+-- infinite number of streams in contrast to the 'Parallel' or 'WAsync' styles,
+-- because it does not require us to run all of them at the same time in a fair
+-- manner.
 
--- $fairParallel
+-- $wasync
 --
--- The 'Alternative' composition operator '<|>', like '<|', runs the composed
--- computations concurrently. However, unlike '<|' it runs all of the
--- computations in fairly parallel manner using a round robin scheduling
--- mechanism. This can be considered as the concurrent version of the fairly
--- interleaved serial operation '<=>'. Note that this cannot be used on
--- infinite containers, as it will lead to an infinite sized scheduling queue.
+-- The 'Semigroup' operation '<>' of the 'WAsync' type combines two streams in
+-- a concurrent manner using /breadth first traversal/. We use the 'wAsyncly'
+-- type combinator to effect 'WAsync' style of composition. We can also use the
+-- 'WAsync' type annotation for the stream to achieve the same effect.
 --
--- The following example sends a query to three search engines in parallel and
--- prints the name of the search engine as a response arrives:
+-- When streams with multiple elements are combined in this manner, we traverse
+-- all the streams concurrently in a breadth first manner i.e. one action from
+-- each stream is performed and yielded to the resulting stream before we come
+-- back to the first stream again and so on. Even though we execute the actions
+-- in a breadth first order the outputs are consumed on a first come first
+-- serve basis.
+--
+-- In the following example we can see that outputs are produced in the breadth
+-- first traversal order but this is not guaranteed.
+--
+-- @
+-- main = 'runStream' . 'wAsyncly' $ (serially $ print 1 |: print 2 |: nil) <> (serially $ print 3 |: print 4 |: nil)
+-- @
+-- @
+-- 1
+-- 3
+-- 2
+-- 4
+-- @
+--
+-- The polymorphic version of the binary operation '<>' of the 'WAsync' type is
+-- 'wAsync'.  We can use 'wAsync' to join streams using a breadth first
+-- concurrent traversal irrespective of the type, notice that we have not used
+-- the 'wAsyncly' combinator in the following example:
+--
+-- @
+-- main = 'runStream' $ delay 3 \`wAsync` delay 2 \`wAsync` delay 1
+-- @
+-- @
+-- ThreadId 42: Delay 1
+-- ThreadId 41: Delay 2
+-- ThreadId 40: Delay 3
+-- @
+--
+-- Since the concurrency provided by this style is demand driven it may not
+-- be used when the composed computations start timers that are relative to
+-- each other because all computations may not be started at the same time and
+-- therefore timers in all of them may not start at the same time.  When
+-- relative timing among all computations is important or when we need to start
+-- all computations at once for any reason 'Parallel' style must be used
+-- instead.
+--
+
+-- $parallel
+--
+-- The 'Semigroup' operation '<>' of the 'Parallel' type combines the two
+-- streams in a fairly concurrent manner with round robin scheduling. We use
+-- the 'parallely' type combinator to effect 'Parallel' style of composition.
+-- We can also use the 'Parallel' type annotation for the stream type to
+-- achieve the same effect.
+--
+-- When two streams with multiple elements are combined in this manner, the
+-- monadic actions in both the streams are performed concurrently with a fair
+-- round robin scheduling.  The outputs are yielded in the order in which the
+-- actions complete. This is pretty similar to the 'WAsync' type, the
+-- difference is that 'WAsync' is adaptive to the consumer demand and may or
+-- may not execute all actions in parallel depending on the demand, whereas
+-- 'Parallel' runs all the streams in parallel irrespective of the demand.
+--
+-- The following example sends a query to all the three search engines in
+-- parallel and prints the name of the search engines in the order in which the
+-- responses arrive:
 --
 -- @
 -- import "Streamly"
+-- import qualified Streamly.Prelude as S
 -- import Network.HTTP.Simple
 --
--- main = 'runStreamT' $ google \<|> bing \<|> duckduckgo
+-- main = 'runStream' . 'parallely' $ google \<> bing \<> duckduckgo
 --     where
 --         google     = get "https://www.google.com/search?q=haskell"
 --         bing       = get "https://www.bing.com/search?q=haskell"
 --         duckduckgo = get "https://www.duckduckgo.com/?q=haskell"
---         get s = liftIO (httpNoBody (parseRequest_ s) >> putStrLn (show s))
+--         get s = S.'yieldM' (httpNoBody (parseRequest_ s) >> putStrLn (show s))
 -- @
+--
+-- The polymorphic version of the binary operation '<>' of the 'Parallel' type
+-- is 'parallel'. We can use 'parallel' to join streams in a fairly concurrent
+-- manner irrespective of the type, notice that we have not used the
+-- 'parallely' combinator in the following example:
+--
+-- @
+-- main = 'runStream' $ delay 3 \`parallel` delay 2 \`wAsync` delay 1
+-- @
+-- @
+-- ThreadId 42: Delay 1
+-- ThreadId 41: Delay 2
+-- ThreadId 40: Delay 3
+-- @
+--
+-- Note that this style of composition cannot be used to combine infinite
+-- number of streams, as it will lead to an infinite sized scheduling queue.
+--
 
 -- $custom
 --
--- The 'async' API can be used to create references to asynchronously running
+-- The 'mkAsync' API can be used to create references to asynchronously running
 -- stream computations. We can then use 'uncons' to explore the streams
 -- arbitrarily and then recompose individual elements to create a new stream.
 -- This way we can dynamically decide which stream to explore at any given
 -- time.  Take an example of a merge sort of two sorted streams. We need to
 -- keep consuming items from the stream which has the lowest item in the sort
 -- order.  This can be achieved using async references to streams. See
--- "Streamly.Examples.MergeSortedStreams".
+-- "MergeSort.hs" in the examples directory.
 
 -- $monoid
 --
--- Each of the semigroup compositions described has an identity that can be
--- used to fold a possibly empty container. An empty stream is represented by
--- 'nil' which can be represented in various standard forms as 'mempty',
--- 'empty' or 'mzero'.
--- Some fold utilities are also provided by the library for convenience:
+-- We can use 'Monoid' instances to fold a container of streams in the desired
+-- style using 'fold' or 'foldMap'.  We have also provided some fold utilities
+-- to fold streams using the polymorphic combine operations:
 --
--- * 'foldWith' folds a 'Foldable' container of stream computations using the
--- given composition operator.
--- * 'foldMapWith' folds like foldWith but also maps a function before folding.
--- * 'forEachWith' is like foldMapwith but the container argument comes before
+-- * 'foldWith' is like 'fold', it folds a 'Foldable' container of streams
+-- using the given composition operator.
+-- * 'foldMapWith' is like 'foldMap', it folds like @foldWith@ but also maps a
+-- function before folding.
+-- * 'forEachWith' is like @foldMapwith@ but the container argument comes before
 -- the function argument.
--- * The 'each' primitive from "Streamly.Prelude" folds a 'Foldable' container
--- using the '<>' operator:
 --
--- All of the following are equivalent:
+-- All of the following are equivalent and start ten concurrent tasks each with
+-- a delay from 1 to 10 seconds, resulting in the printing of each number every
+-- second:
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
+-- import Control.Concurrent
 --
 -- main = do
---  'toList' . 'serially' $ 'foldWith'    (<>) (map return [1..10]) >>= print
---  'toList' . 'serially' $ 'foldMapWith' (<>) return [1..10]       >>= print
---  'toList' . 'serially' $ 'forEachWith' (<>) [1..10] return       >>= print
---  'toList' . 'serially' $ 'each' [1..10]                          >>= print
+--  'runStream' $ 'asyncly' $ foldMap delay [1..10]
+--  'runStream' $ 'foldWith'    'async' (map delay [1..10])
+--  'runStream' $ 'foldMapWith' 'async' delay [1..10]
+--  'runStream' $ 'forEachWith' 'async' [1..10] delay
+--  where delay n = S.'yieldM' $ threadDelay (n * 1000000) >> print n
 -- @
 
--- $transforming
+-- $nesting
 --
--- The previous section discussed ways to merge the elements of two streams
--- without doing any transformation on them. In this section we will explore
--- how to transform streams using 'Functor', 'Applicative' or 'Monad' style
--- compositions. The applicative and monad composition of all 'Streaming' types
--- behave exactly the same way as a list transformer.  For simplicity of
--- illustration we are using streams of pure values in the following examples.
--- However, the real application of streams arises when these streams are
--- generated using monadic actions.
-
+-- Till now we discussed ways to apply transformations on a stream or to merge
+-- streams together to create another stream. We mentioned earlier that
+-- transforming a stream is similar to a @for@ loop in the imperative paradigm.
+-- We will now discuss the concept of a nested composition of streams which is
+-- analogous to nested @for@ loops in the imperative paradigm. Functional
+-- programmers call this style of composition a list transformer or @ListT@.
+-- Logic programmers call it a logic monad or non-deterministic composition,
+-- but for ordinary imperative minded people like me it is easier to think in
+-- terms of good old nested @for@ loops.
+--
 -- $monad
 --
--- In functional programmer's parlance the 'Monad' instance of 'Streaming'
--- types implement non-determinism, exploring all possible combination of
--- choices from both the streams. From an imperative programmer's point of view
--- it behaves like nested loops i.e.  for each element in the first stream and
--- for each element in the second stream apply the body of the loop. If you are
--- familiar with list transformer this behavior is exactly the same as that of
--- a list transformer.
+-- In functional programmer's parlance the 'Monad' instances of different
+-- 'IsStream' types implement non-determinism, exploring all possible
+-- combination of choices from both the streams. From an imperative
+-- programmer's point of view it behaves like nested loops i.e.  for each
+-- element in the first stream and for each element in the second stream
+-- execute the body of the loop.
 --
--- Just like we saw in sum style compositions earlier, monadic composition also
--- has multiple variants each of which exactly corresponds to one of the sum
--- style composition variant.
+-- The 'Monad' instances of 'Serial', 'WSerial', 'Async' and 'WAsync'
+-- stream types support different flavors of nested looping.  In other words,
+-- they are all variants of list transformer.  The nesting behavior of these
+-- types correspond exactly to the way they merge streams as we discussed in
+-- the previous section.
+--
 
 -- $regularSerial
 --
--- When we interpret the monadic composition as 'StreamT' we get a standard
--- list transformer like serial composition.
+-- The 'Monad' composition of the 'Serial' type behaves like a standard list
+-- transformer. This is the default when we do not use an explicit type
+-- combinator. However, the 'serially' type combinator can be used to switch to
+-- this style of composition. We will see how this style of composition works
+-- in the following examples.
+--
+-- Let's start with an example with a simple @for@ loop without any nesting.
+-- For simplicity of illustration we are using streams of pure values in all
+-- the examples.  However, the streams could also be made of monadic actions
+-- instead.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runStreamT' $ do
---     x <- 'each' [3,2,1]
+-- main = 'runStream' $ do
+--     x <- S.'fromFoldable' [3,2,1]
 --     delay x
 -- @
 -- @
@@ -425,34 +988,34 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- ThreadId 30: Delay 1
 -- @
 --
--- As you can see the code after the @each@ statement is run three times, once
--- for each value of @x@. All the three iterations are serial and run in the
--- same thread one after another. When compared to imperative programming, this
--- can also be viewed as a @for@ loop with three iterations.
+-- As we can see, the code after the @fromFoldable@ statement is run three
+-- times, once for each value of @x@ drawn from the stream. All the three
+-- iterations are serial and run in the same thread one after another. In
+-- imperative terms this is equivalent to a @for@ loop with three iterations.
 --
 -- A console echo loop copying standard input to standard output can simply be
 -- written like this:
 --
 -- @
 -- import "Streamly"
--- import Data.Semigroup (cycle1)
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runStreamT' $ cycle1 (liftIO getLine) >>= liftIO . putStrLn
+-- main = 'runStream' $ forever $ S.yieldM getLine >>= S.yieldM . putStrLn
 -- @
 --
 -- When multiple streams are composed using this style they nest in a DFS
--- manner i.e. nested iterations of an iteration are executed before we proceed
--- to the next iteration at higher level. This behaves just like nested @for@
+-- manner i.e. nested iterations of a loop are executed before we proceed to
+-- the next iteration of the parent loop. This behaves just like nested @for@
 -- loops in imperative programming.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runStreamT' $ do
---     x <- 'each' [1,2]
---     y <- 'each' [3,4]
---     liftIO $ putStrLn $ show (x, y)
+-- main = 'runStream' $ do
+--     x <- S.'fromFoldable' [1,2]
+--     y <- S.'fromFoldable' [3,4]
+--     S.'yieldM' $ putStrLn $ show (x, y)
 -- @
 -- @
 -- (1,3)
@@ -461,24 +1024,66 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- (2,4)
 -- @
 --
--- You will also notice that this is the monadic equivalent of the sum style
--- composition using '<>'.
+-- Notice that this is analogous to merging streams of type 'Serial' or merging
+-- streams using 'serial'.
+
+-- $aheadNesting
+--
+-- The 'Monad' composition of 'Ahead' type behaves just like 'Serial' except
+-- that it can speculatively perform a bounded number of next iterations of a
+-- loop concurrently.
+--
+-- The 'aheadly' type combinator can be used to switch to this style of
+-- composition. Alternatively, a type annotation can be used to specify the
+-- type of the stream as 'Ahead'.
+--
+-- @
+-- import "Streamly"
+-- import "Streamly.Prelude" as S
+--
+-- comp = 'toList' . 'aheadly' $ do
+--     x <- S.'fromFoldable' [3,2,1]
+--     delay x >> return x
+--
+-- main = comp >> print
+-- @
+-- @
+-- ThreadId 40: Delay 1
+-- ThreadId 39: Delay 2
+-- ThreadId 38: Delay 3
+-- [3,2,1]
+-- @
+--
+-- This code finishes in 3 seconds, 'Serial' would take 6 seconds.  As we can
+-- see all the three iterations are concurrent and run in different threads,
+-- however, the results are returned in the serial order.
+--
+-- Concurrency is demand driven, when multiple streams are composed using this
+-- style, the iterations are executed in a depth first manner just like
+-- 'Serial' i.e. nested iterations are executed before we proceed to the next
+-- outer iteration. The only difference is that we may execute multiple future
+-- iterations concurrently and keep the results ready.
+--
 
 -- $concurrentNesting
 --
--- When we interpret the monadic composition as 'AsyncT' we get a /concurrent/
--- list-transformer like composition. Multiple monadic continuations (or loop
--- iterations) may be started concurrently. Concurrency is demand driven
--- i.e. more concurrent iterations are started only if the previous iterations
--- are not able to produce enough output for the consumer of the output stream.
--- This is the concurrent version of 'StreamT'.
+-- The 'Monad' composition of 'Async' type can perform the iterations of a
+-- loop concurrently.  Concurrency is demand driven i.e. more concurrent
+-- iterations are started only if the previous iterations are not able to
+-- produce enough output for the consumer of the output stream.  This works
+-- exactly the same way as the merging of two streams 'asyncly' works.
+-- This is the concurrent analogue of 'Serial' style monadic composition.
+--
+-- The 'asyncly' type combinator can be used to switch to this style of
+-- composition. Alternatively, a type annotation can be used to specify the
+-- type of the stream as 'Async'.
 --
 -- @
 -- import "Streamly"
 -- import "Streamly.Prelude"
 --
--- main = 'runAsyncT' $ do
---     x <- 'each' [3,2,1]
+-- main = 'runStream' . 'asyncly' $ do
+--     x <- S.'fromFoldable' [3,2,1]
 --     delay x
 -- @
 -- @
@@ -487,27 +1092,27 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- ThreadId 38: Delay 3
 -- @
 --
--- As you can see the code after the @each@ statement is run three times, once
--- for each value of @x@. All the three iterations are concurrent and run in
--- different threads. The iteration with least delay finishes first. When
--- compared to imperative programming, this can be viewed as a @for@ loop
+-- As we can see the code after the @fromFoldable@ statement is run three
+-- times, once for each value of @x@. All the three iterations are concurrent
+-- and run in different threads. The iteration with least delay finishes first.
+-- When compared to imperative programming, this can be viewed as a @for@ loop
 -- with three concurrent iterations.
 --
--- Concurrency is demand driven just as in the case of '<|'. When multiple
--- streams are composed using this style the iterations are triggered in a DFS
--- manner just like 'StreamT' i.e. nested iterations are executed before we
--- proceed to the next iteration at higher level. However, unlike 'StreamT'
--- more than one iterations may be started concurrently, and based on the
--- demand from the consumer.
+-- Concurrency is demand driven just as in the case of 'async' merging.
+-- When multiple streams are composed using this style, the iterations are
+-- triggered in a depth first manner just like 'Serial' i.e. nested iterations are
+-- executed before we proceed to the next iteration at higher level. However,
+-- unlike 'Serial' more than one iterations may be started concurrently based
+-- on the demand from the consumer of the stream.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runAsyncT' $ do
---     x <- 'each' [1,2]
---     y <- 'each' [3,4]
---     liftIO $ putStrLn $ show (x, y)
+-- main = 'runStream' . 'asyncly' $ do
+--     x <- S.'fromFoldable' [1,2]
+--     y <- S.'fromFoldable' [3,4]
+--     S.'yieldM' $ putStrLn $ show (x, y)
 -- @
 -- @
 -- (1,3)
@@ -515,25 +1120,24 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- (2,3)
 -- (2,4)
 -- @
---
--- You will notice that this is the monadic equivalent of the '<|' style
--- sum composition. The same caveats apply to this as the '<|' operation.
 
 -- $interleavedNesting
 --
--- When we interpret the monadic composition as 'InterleavedT' we get a serial
--- but fairly interleaved list-transformer like composition. The monadic
--- continuations or iterations of the outer loop are fairly interleaved with
--- the continuations or iterations of the inner loop.
+-- The 'Monad' composition of 'WSerial' type interleaves the iterations of
+-- outer and inner loops in a nested loop composition. This works exactly the
+-- same way as the merging of two streams in 'wSerially' fashion works.  The
+-- 'wSerially' type combinator can be used to switch to this style of
+-- composition. Alternatively, a type annotation can be used to specify the
+-- type of the stream as 'WSerial'.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runInterleavedT' $ do
---     x <- 'each' [1,2]
---     y <- 'each' [3,4]
---     liftIO $ putStrLn $ show (x, y)
+-- main = 'runStream' . 'wSerially' $ do
+--     x <- S.'fromFoldable' [1,2]
+--     y <- S.'fromFoldable' [3,4]
+--     S.yieldM $ putStrLn $ show (x, y)
 -- @
 -- @
 -- (1,3)
@@ -542,22 +1146,50 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- (2,4)
 -- @
 --
--- You will notice that this is the monadic equivalent of the '<=>' style
--- sum composition. The same caveats apply to this as the '<=>' operation.
 
--- $fairlyConcurrentNesting
+-- $wasyncNesting
 --
--- When we interpret the monadic composition as 'ParallelT' we get a
--- /concurrent/ list-transformer like composition just like 'AsyncT'. The
--- difference is that this is fully parallel with all iterations starting
--- concurrently instead of the demand driven concurrency of 'AsyncT'.
+-- Just like 'Async' the 'Monad' composition of 'WAsync' runs the iterations of
+-- a loop concurrently. The difference is in the nested loop behavior. The
+-- nested loops in this type are traversed and executed in a breadth first
+-- manner rather than the depth first manner of 'Async' style.
+-- The loop nesting works exactly the same way as the merging of streams
+-- 'wAsyncly' works.  The 'wAsyncly' type combinator can be used to switch to
+-- this style of composition. Alternatively, a type annotation can be used to
+-- specify the type of the stream as 'WAsync'.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = 'runParallelT' $ do
---     x <- 'each' [3,2,1]
+-- main = 'runStream' . 'wAsyncly' $ do
+--     x <- S.'fromFoldable' [1,2]
+--     y <- S.'fromFoldable' [3,4]
+--     S.'yieldM' $ putStrLn $ show (x, y)
+-- @
+-- @
+-- (1,3)
+-- (2,3)
+-- (1,4)
+-- (2,4)
+-- @
+
+-- $parallelNesting
+--
+-- Just like 'Async' or 'WAsync' the 'Monad' composition of 'Parallel' runs the
+-- iterations of a loop concurrently. The difference is in the nested loop
+-- behavior. The streams at each nest level is run fully concurrently
+-- irrespective of the demand.  The loop nesting works exactly the same way as
+-- the merging of streams 'parallely' works.  The 'parallely' type combinator
+-- can be used to switch to this style of composition. Alternatively, a type
+-- annotation can be used to specify the type of the stream as 'Parallel'.
+--
+-- @
+-- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
+--
+-- main = 'runStream' . 'parallely' $ do
+--     x <- S.'fromFoldable' [3,2,1]
 --     delay x
 -- @
 -- @
@@ -565,53 +1197,40 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- ThreadId 39: Delay 2
 -- ThreadId 38: Delay 3
 -- @
---
--- You will notice that this is the monadic equivalent of the '<|>' style
--- sum composition. The same caveats apply to this as the '<|>' operation.
 
 -- $monadExercise
 --
--- The streamly code is usually written in a way that is agnostic of the
+-- Streamly code is usually written in a way that is agnostic of the
 -- specific monadic composition type. We use a polymorphic type with a
--- 'Streaming' type class constraint. When running the stream we can choose the
--- specific mode of composition. For example look at the following code.
+-- 'IsStream' type class constraint. When running the stream we can choose the
+-- specific mode of composition. For example take a look at the following code.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 --
---
--- composed :: 'Streaming' t => t m a
+-- composed :: (IsStream t, Monad (t IO)) => t IO ()
 -- composed = do
 --     sz <- sizes
 --     cl <- colors
 --     sh <- shapes
---     liftIO $ putStrLn $ show (sz, cl, sh)
+--     S.'yieldM' $ putStrLn $ show (sz, cl, sh)
 --
 --     where
 --
---     sizes  = 'each' [1, 2, 3]
---     colors = 'each' ["red", "green", "blue"]
---     shapes = 'each' ["triangle", "square", "circle"]
+--     sizes  = S.'fromFoldable' [1, 2, 3]
+--     colors = S.'fromFoldable' ["red", "green", "blue"]
+--     shapes = S.'fromFoldable' ["triangle", "square", "circle"]
 -- @
 --
 -- Now we can interpret this in whatever way we want:
 --
 -- @
--- main = 'runStreamT'      composed
--- main = 'runAsyncT'       composed
--- main = 'runInterleavedT' composed
--- main = 'runParallelT'    composed
--- @
---
--- Equivalently, we can also write it using the type adapter combinators, like
--- this:
---
--- @
--- main = 'runStreaming' $ 'serially'     $ composed
--- main = 'runStreaming' $ 'asyncly'      $ composed
--- main = 'runStreaming' $ 'interleaving' $ composed
--- main = 'runStreaming' $ 'parallely'    $ composed
+-- main = 'runStream' . 'serially'  $ composed
+-- main = 'runStream' . 'wSerially' $ composed
+-- main = 'runStream' . 'asyncly'   $ composed
+-- main = 'runStream' . 'wAsyncly'  $ composed
+-- main = 'runStream' . 'parallely' $ composed
 -- @
 --
 --  As an exercise try to figure out the output of this code for each mode of
@@ -620,15 +1239,14 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- $functor
 --
 -- 'fmap' transforms a stream by mapping a function on all elements of the
--- stream. The functor instance of each stream type defines 'fmap' to be
--- precisely the same as 'liftM', and therefore 'fmap' is always serial
--- irrespective of the type. For concurrent mapping, alternative versions of
--- 'fmap', namely, 'asyncMap' and 'parMap' are provided.
+-- stream. 'fmap' behaves in the same way for all stream types, it is always
+-- serial.
 --
 -- @
 -- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
 --
--- main = ('toList' $ 'serially' $ fmap show $ 'each' [1..10]) >>= print
+-- main = (S.'toList' $ fmap show $ S.'fromFoldable' [1..10]) >>= print
 -- @
 --
 -- Also see the 'mapM' and 'sequence' functions for mapping actions, in the
@@ -637,22 +1255,22 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- $applicative
 --
 -- Applicative is precisely the same as the 'ap' operation of 'Monad'. For
--- zipping and parallel applicatives separate types 'ZipStream' and 'ZipAsync'
--- are provided.
+-- zipping applicatives separate types 'ZipSerial' and 'ZipAsync' are
+-- provided.
 --
--- The following example runs all iterations serially and takes a total 17
--- seconds (1 + 3 + 4 + 2 + 3 + 4):
+-- The following example uses the 'Serial' applicative, it runs all iterations
+-- serially and takes a total 17 seconds (1 + 3 + 4 + 2 + 3 + 4):
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 -- import Control.Concurrent
 --
 -- s1 = d 1 <> d 2
 -- s2 = d 3 <> d 4
 -- d n = delay n >> return n
 --
--- main = ('toList' . 'serially' $ (,) \<$> s1 \<*> s2) >>= print
+-- main = (S.'toList' . 'serially' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 -- @
 -- ThreadId 36: Delay 1
@@ -664,11 +1282,11 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- [(1,3),(1,4),(2,3),(2,4)]
 -- @
 --
--- Similalrly interleaving runs the iterations in an interleaved order but
--- since it is serial it takes a total of 17 seconds:
+-- Similarly 'WSerial' applicative runs the iterations in an interleaved
+-- order but since it is serial it takes a total of 17 seconds:
 --
 -- @
--- main = ('toList' . 'interleaving' $ (,) \<$> s1 \<*> s2) >>= print
+-- main = (S.'toList' . 'wSerially' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 -- @
 -- ThreadId 36: Delay 1
@@ -680,11 +1298,11 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- [(1,3),(2,3),(1,4),(2,4)]
 -- @
 --
--- 'AsyncT' can run the iterations concurrently and therefore takes a total
+-- 'Async' can run the iterations concurrently and therefore takes a total
 -- of 10 seconds (1 + 2 + 3 + 4):
 --
 -- @
--- main = ('toList' . 'asyncly' $ (,) \<$> s1 \<*> s2) >>= print
+-- main = (S.'toList' . 'asyncly' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 -- @
 -- ThreadId 34: Delay 1
@@ -696,11 +1314,11 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- [(1,3),(2,3),(1,4),(2,4)]
 -- @
 --
--- Similalrly 'ParallelT' as well can run the iterations concurrently and
+-- Similarly 'WAsync' as well can run the iterations concurrently and
 -- therefore takes a total of 10 seconds (1 + 2 + 3 + 4):
 --
 -- @
--- main = ('toList' . 'parallely' $ (,) \<$> s1 \<*> s2) >>= print
+-- main = (S.'toList' . 'wAsyncly' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 -- @
 -- ThreadId 34: Delay 1
@@ -710,26 +1328,6 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- ThreadId 35: Delay 4
 -- ThreadId 36: Delay 4
 -- [(1,3),(2,3),(1,4),(2,4)]
--- @
-
--- $compositionSummary
---
--- The following table summarizes the types for monadic compositions and the
--- operators for sum style compositions. This table captures the essence of
--- streamly.
---
--- @
--- +-----+--------------+------------+
--- |     | Serial       | Concurrent |
--- +=====+==============+============+
--- | DFS | 'StreamT'      | 'AsyncT'     |
--- |     +--------------+------------+
--- |     | '<>'           | '<|'         |
--- +-----+--------------+------------+
--- | BFS | 'InterleavedT' | 'ParallelT'  |
--- |     +--------------+------------+
--- |     | '<=>'          | '<|>'        |
--- +-----+--------------+------------+
 -- @
 
 -- $zipping
@@ -737,23 +1335,26 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- Zipping is a special transformation where the corresponding elements of two
 -- streams are combined together using a zip function producing a new stream of
 -- outputs. Two different types are provided for serial and concurrent zipping.
--- These types provide an applicative instance that zips the argument streams.
--- Also see the zipping function in the "Streamly.Prelude" module.
+-- These types provide an applicative instance that can be used to lift
+-- functions to zip the argument streams.
+-- Also see the zipping functions in the "Streamly.Prelude" module.
 
 -- $serialzip
 --
--- 'ZipStream' zips streams serially:
+-- The applicative instance of 'ZipSerial' type zips streams serially.
+-- 'zipSerially' type combinator can be used to switch to serial applicative
+-- zip composition:
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 -- import Control.Concurrent
 --
 -- d n = delay n >> return n
--- s1 = 'adapt' . 'serially' $ d 1 <> d 2
--- s2 = 'adapt' . 'serially' $ d 3 <> d 4
+-- s1 = 'serially' $ d 1 <> d 2
+-- s2 = 'serially' $ d 3 <> d 4
 --
--- main = ('toList' . 'zipping' $ (,) \<$> s1 \<*> s2) >>= print
+-- main = (S.'toList' . 'zipSerially' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 --
 -- This takes total 10 seconds to zip, which is (1 + 2 + 3 + 4) since
@@ -769,21 +1370,24 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 
 -- $parallelzip
 --
--- 'ZipAsync' zips streams concurrently:
+-- The applicative instance of 'ZipAsync' type zips streams concurrently.
+-- 'zipAsyncly' type combinator can be used to switch to parallel applicative
+-- zip composition:
+--
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude"
+-- import qualified "Streamly.Prelude" as S
 -- import Control.Concurrent
 -- import System.IO (stdout, hSetBuffering, BufferMode(LineBuffering))
 --
 -- d n = delay n >> return n
--- s1 = 'adapt' . 'serially' $ d 1 <> d 2
--- s2 = 'adapt' . 'serially' $ d 3 <> d 4
+-- s1 = 'serially' $ d 1 <> d 2
+-- s2 = 'serially' $ d 3 <> d 4
 --
 -- main = do
---     liftIO $ hSetBuffering stdout LineBuffering
---     ('toList' . 'zippingAsync' $ (,) \<$> s1 \<*> s2) >>= print
+--     hSetBuffering stdout LineBuffering
+--     (S.'toList' . 'zipAsyncly' $ (,) \<$> s1 \<*> s2) >>= print
 -- @
 --
 -- This takes 7 seconds to zip, which is max (1,3) + max (2,4) because 1 and 3
@@ -800,41 +1404,42 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- $concurrent
 --
 -- When writing concurrent programs there are two distinct places where the
--- programmer chooses the type of concurrency. First, when /generating/ a
--- stream by combining other streams we can use one of the sum style operators
--- to combine them concurrently or serially. Second, when /processing/ a stream
--- in a monadic composition we can choose one of the monad composition types to
+-- programmer can control the concurrency. First, when /composing/ a stream by
+-- merging multiple streams we can choose an appropriate sum style operators to
+-- combine them concurrently or serially. Second, when /processing/ a stream in
+-- a monadic composition we can choose one of the monad composition types to
 -- choose the desired type of concurrency.
 --
 -- In the following example the squares of @x@ and @y@ are computed
--- concurrently using the '<|' operator and the square roots of their sum are
--- also computed concurrently by using the 'asyncly' combinator. We can choose
--- different combinators e.g. '<>' and 'serially', to control the concurrency.
+-- concurrently using the 'async' operation and the square roots of their
+-- sum are computed serially because of the 'streamly' combinator. We can
+-- choose different combinators for the monadic processing and the stream
+-- generation, to control the concurrency.  We can also use the 'asyncly'
+-- combinator instead of explicitly folding with 'async'.
 --
 -- @
 -- import "Streamly"
--- import "Streamly.Prelude" (toList)
+-- import qualified "Streamly.Prelude" as S
 -- import Data.List (sum)
 --
 -- main = do
---     z \<-   'toList'
---          $ 'asyncly'     -- Concurrent monadic processing (sqrt below)
+--     z \<-   S.'toList'
+--          $ 'serially'     -- Serial monadic processing (sqrt below)
 --          $ do
---              x2 \<- 'forEachWith' ('<|') [1..100] $ -- Concurrent @"for"@ loop
+--              x2 \<- 'forEachWith' 'async' [1..100] $ -- Concurrent @"for"@ loop
 --                          \\x -> return $ x * x  -- body of the loop
---              y2 \<- 'forEachWith' ('<|') [1..100] $
+--              y2 \<- 'forEachWith' 'async' [1..100] $
 --                          \\y -> return $ y * y
 --              return $ sqrt (x2 + y2)
 --     print $ sum z
 -- @
 --
--- You can see how this directly maps to the imperative style
+-- We can see how this directly maps to the imperative style
 -- <https://en.wikipedia.org/wiki/OpenMP OpenMP> model, we use combinators
 -- and operators instead of the ugly pragmas.
 --
 -- For more concurrent programming examples see,
--- "Streamly.Examples.ListDirRecursive", "Streamly.Examples.MergeSortedStreams"
--- and "Streamly.Examples.SearchEngineQuery".
+-- "ListDir.hs", "MergeSort.hs" and "SearchQuery.hs" in the examples directory.
 
 -- $reactive
 --
@@ -847,26 +1452,25 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- (active hyperlinks are the streamly APIs) and yet it is a reactive
 -- application.
 --
---
 -- This application has two independent and concurrent sources of event
 -- streams, @acidRain@ and @userAction@. @acidRain@ continuously generates
--- events that deteriorate the health of the game character. @userAction@ can
--- be "potion" or "quit". When the user types "potion" the health improves and
--- the game continues.
+-- events that deteriorate the health of the character in the game.
+-- @userAction@ can be "potion" or "quit". When the user types "potion" the
+-- health improves and the game continues.
 --
 -- @
 -- {-\# LANGUAGE FlexibleContexts #-}
 --
 -- import "Streamly"
--- import Control.Concurrent (threadDelay)
+-- import Streamly.Prelude as S
 -- import Control.Monad (when)
--- import Control.Monad.State
--- import Data.Semigroup (cycle1)
+-- import Control.Monad.IO.Class (MonadIO(..))
+-- import Control.Monad.State (MonadState, get, modify, runStateT)
 --
 -- data Event = Harm Int | Heal Int | Quit deriving (Show)
 --
--- userAction :: MonadIO m => 'StreamT' m Event
--- userAction = cycle1 $ liftIO askUser
+-- userAction :: MonadAsync m => 'SerialT' m Event
+-- userAction = S.repeatM $ liftIO askUser
 --     where
 --     askUser = do
 --         command <- getLine
@@ -875,12 +1479,12 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 --             "quit"   -> return  Quit
 --             _        -> putStrLn "What?" >> askUser
 --
--- acidRain :: MonadIO m => 'StreamT' m Event
--- acidRain = cycle1 $ liftIO (threadDelay 1000000) >> return (Harm 1)
+-- acidRain :: MonadAsync m => SerialT m Event
+-- acidRain = asyncly $ constRate 1 $ S.repeatM $ liftIO $ return $ Harm 1
 --
--- game :: ('MonadAsync' m, MonadState Int m) => 'StreamT' m ()
+-- game :: ('MonadAsync' m, MonadState Int m) => 'SerialT' m ()
 -- game = do
---     event \<- userAction \<|> acidRain
+--     event \<- userAction \`parallel` acidRain
 --     case event of
 --         Harm n -> modify $ \\h -> h - n
 --         Heal n -> modify $ \\h -> h + n
@@ -893,12 +1497,12 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- main = do
 --     putStrLn "Your health is deteriorating due to acid rain,\\
 --              \\ type \\"potion\\" or \\"quit\\""
---     _ <- runStateT ('runStreamT' game) 60
+--     _ <- runStateT ('runStream' game) 60
 --     return ()
 -- @
 --
--- You can also find the source of this example in
--- "Streamly.Examples.AcidRainGame". It has been adapted from Gabriel's
+-- You can also find the source of this example in the examples directory as
+-- "AcidRain.hs". It has been adapted from Gabriel's
 -- <https://hackage.haskell.org/package/pipes-concurrency-2.0.8/docs/Pipes-Concurrent-Tutorial.html pipes-concurrency>
 -- package.
 -- This is much simpler compared to the pipes version because of the builtin
@@ -913,87 +1517,146 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- package which is specifically and carefully designed to measure the
 -- performance of Haskell streaming libraries fairly and squarely in the right
 -- way. Streamly performs at par or even better than most streaming libraries
--- for common operations even though it needs to deal with the concurrency
+-- for serial operations even though it needs to deal with the concurrency
 -- capability.
 
 -- $interop
 --
 -- We can use @unfoldr@ and @uncons@ to convert one streaming type to another.
--- We will assume the following common code to be available in the examples
--- demonstrated below.
+--
+--  Interop with @vector@:
 --
 -- @
--- import "Streamly"
--- import "Streamly.Prelude"
--- import System.IO (stdin)
+-- import Streamly
+-- import qualified Streamly.Prelude as S
+-- import qualified Data.Vector.Fusion.Stream.Monadic as V
 --
--- -- Adapt uncons to return an Either instead of Maybe
--- unconsE s = 'uncons' s >>= maybe (return $ Left ()) (return . Right)
--- stdinLn = 'serially' $ 'fromHandle' stdin
+-- -- | vector to streamly
+-- fromVector :: (IsStream t, Monad m) => V.Stream m a -> t m a
+-- fromVector = S.unfoldrM unconsV
+--     where
+--     unconsV v = do
+--         r <- V.null v
+--         if r
+--         then return Nothing
+--         else do
+--             h <- V.head v
+--             return $ Just (h, V.tail v)
+--
+-- -- | streamly to vector
+-- toVector :: Monad m => SerialT m a -> V.Stream m a
+-- toVector = V.unfoldrM (S.uncons . adapt)
+--
+-- main = do
+--     S.toList (fromVector (V.fromList [1..3]))   >>= print
+--     V.toList (toVector (S.fromFoldable [1..3])) >>= print
 -- @
 --
 --  Interop with @pipes@:
 --
 -- @
+-- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
 -- import qualified Pipes as P
 -- import qualified Pipes.Prelude as P
 --
--- main = do
---     -- streamly to pipe
---     P.runEffect $ P.for (P.unfoldr unconsE stdinLn) (lift . putStrLn)
---
---     -- pipe to streamly
+-- -- | pipes to streamly
+-- fromPipes :: (IsStream t, Monad m) => P.Producer a m r -> t m a
+-- fromPipes = S.'unfoldrM' unconsP
+--     where
 --     -- Adapt P.next to return a Maybe instead of Either
---     let nextM p = P.next p >>= either (\\_ -> return Nothing) (return . Just)
---     'runStreamT' $ 'unfoldrM' nextM P.stdinLn >>= lift . putStrLn
+--     unconsP p = P.next p >>= either (\\_ -> return Nothing) (return . Just)
+--
+-- -- | streamly to pipes
+-- toPipes :: Monad m => SerialT m a -> P.Producer a m ()
+-- toPipes = P.unfoldr unconsS
+--     where
+--     -- Adapt S.uncons to return an Either instead of Maybe
+--     unconsS s = S.'uncons' s >>= maybe (return $ Left ()) (return . Right)
+--
+-- main = do
+--     S.'toList' (fromPipes (P.each [1..3])) >>= print
+--     P.toListM (toPipes (S.'fromFoldable' [1..3])) >>= print
 -- @
 --
 -- Interop with @streaming@:
 --
 -- @
--- import qualified Streaming as S
--- import qualified Streaming.Prelude as S
+-- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
+-- import qualified Streaming as SG
+-- import qualified Streaming.Prelude as SG
+--
+-- -- | streaming to streamly
+-- fromStreaming :: (IsStream t, Monad m) => SG.Stream (SG.Of a) m r -> t m a
+-- fromStreaming = S.unfoldrM SG.uncons
+--
+-- -- | streamly to streaming
+-- toStreaming :: Monad m => SerialT m a -> SG.Stream (SG.Of a) m ()
+-- toStreaming = SG.unfoldr unconsS
+--     where
+--     -- Adapt S.uncons to return an Either instead of Maybe
+--     unconsS s = S.'uncons' s >>= maybe (return $ Left ()) (return . Right)
 --
 -- main = do
---     -- streamly to streaming
---     S.stdoutLn $ S.unfoldr unconsE stdinLn
---
---     -- streaming to streamly
---     'runStreamT' $ unfoldrM S.uncons S.stdinLn >>= lift . putStrLn
---
+--     S.toList (fromStreaming (SG.each [1..3])) >>= print
+--     SG.toList (toStreaming (S.fromFoldable [1..3])) >>= print
 -- @
 --
 -- Interop with @conduit@:
 --
 -- @
+-- import "Streamly"
+-- import qualified "Streamly.Prelude" as S
 -- import qualified Data.Conduit as C
 -- import qualified Data.Conduit.List as C
 -- import qualified Data.Conduit.Combinators as C
 --
--- -- streamly to conduit
--- main = (C.unfoldM 'uncons' stdinLn) C.$$ C.print
+-- -- It seems there is no way out of a conduit as it does not provide an
+-- -- uncons or a tail function. We can convert streamly to conduit though.
+--
+-- -- | streamly to conduit
+-- toConduit :: Monad m => SerialT m a -> C.ConduitT i a m ()
+-- toConduit s = C.unfoldM S.'uncons' s
+--
+-- main = do
+--  C.runConduit (toConduit (S.'fromFoldable' [1..3]) C..| C.sinkList) >>= print
 -- @
 
 -- $comparison
 --
--- Streamly unifies non-determinism, streaming, concurrency and FRP
--- functionality that is otherwise covered by several disparate packages, and
--- it does that with a surprisingly concise API.  Here is a list of popular and
--- well-known packages in all these areas:
+-- List transformers and logic programming monads also provide a product style
+-- composition similar to streamly, however streamly generalizes it with the
+-- time dimension; allowing streams to be composed in an asynchronous and
+-- concurrent fashion in many different ways.  It also provides multiple
+-- alternative ways of composing streams e.g.  serial, interleaved or
+-- concurrent.
+--
+-- This seemingly simple addition of asynchronicity and concurrency to product
+-- style streaming composition unifies a number of disparate abstractions into
+-- one powerful, concise and elegant abstraction.  A wide variety of
+-- programming problems can be solved elegantly with this abstraction. In
+-- particular, it unifies three major programming domains namely
+-- non-deterministic (logic) programming, concurrent programming and functional
+-- reactive programming. In other words, you can do everything with this one
+-- abstraction that you could do with the popular libraries listed under these
+-- categories in the list below.
 --
 -- @
 -- +-----------------+----------------+
--- | Non-determinism | <https://hackage.haskell.org/package/list-t list-t>         |
+-- | Non-determinism | <https://hackage.haskell.org/package/pipes pipes>          |
+-- |                 +----------------+
+-- |                 | <https://hackage.haskell.org/package/list-t list-t>         |
 -- |                 +----------------+
 -- |                 | <https://hackage.haskell.org/package/logict logict>         |
 -- +-----------------+----------------+
--- | Streaming       | <https://hackage.haskell.org/package/streaming streaming>      |
+-- | Streaming       | <https://hackage.haskell.org/package/vector vector>         |
 -- |                 +----------------+
--- |                 | <https://hackage.haskell.org/package/conduit conduit>        |
+-- |                 | <https://hackage.haskell.org/package/streaming streaming>      |
 -- |                 +----------------+
 -- |                 | <https://hackage.haskell.org/package/pipes pipes>          |
 -- |                 +----------------+
--- |                 | <https://hackage.haskell.org/package/simple-conduit simple-conduit> |
+-- |                 | <https://hackage.haskell.org/package/conduit conduit>        |
 -- +-----------------+----------------+
 -- | Concurrency     | <https://hackage.haskell.org/package/async async>          |
 -- |                 +----------------+
@@ -1007,31 +1670,30 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- +-----------------+----------------+
 -- @
 --
--- Streamly covers all the functionality provided by both the non-determinism
--- packages listed above and provides better performance in comparison to
--- those. In fact, at the core streamly is a list transformer but it naturally
--- integrates the concurrency dimension to the basic list transformer
--- functionality.
+-- Streamly is a list-transformer. It provides all the functionality provided
+-- by any of the list transformer and logic programming packages listed above.
+-- In addition, Streamly naturally integrates the concurrency dimension to the
+-- basic list transformer functionality.
 --
--- When it comes to streaming, in terms of core concepts, @simple-conduit@ is
--- the package that is closest to streamly if we set aside the concurrency
--- dimension, both are streaming packages with list transformer like monad
--- composition.  However, in terms of API @streamly@ is more like the @streaming@
--- package. Streamly can be used to achieve more or less the functionality
--- provided by any of the streaming packages listed above. The types and API of
--- streamly are much simpler in comparison to conduit and pipes. It is more or
--- less like the standard Haskell list APIs.
+-- When it comes to streaming, in terms of the streaming API streamly is almost
+-- identical to the vector package. Streamly, vector and streaming packages all
+-- represent a stream as data and are therefore similar in the fundamental
+-- approach to streaming. The fundamental difference is that streamly adds
+-- concurrency support and the monad instance provides concurrent looping.
+-- Other streaming libraries like pipes, conduit and machines represent and
+-- compose stream processors rather than the stream data and therefore fall in
+-- another class of streaming libraries and have comparatively more complicated
+-- types.
 --
 -- When it comes to concurrency, streamly can do everything that the @async@
 -- package can do and more. async provides applicative concurrency whereas
--- streamly provides both applicative and monadic concurrency. The 'ZipAsync'
--- type behaves like the applicative instance of async.  This work was
--- originally inspired by the concurrency implementation in @transient@ though
--- it has no resemblence with that. Streamly provides concurrency as transient
--- does but in a sort of dual manner, it can lazily stream the output. In
+-- streamly provides both applicative and monadic concurrency. The
+-- 'ZipAsync' type behaves like the applicative instance of async.  In
 -- comparison to transient streamly has a first class streaming interface and
 -- is a monad transformer that can be used universally in any Haskell monad
--- transformer stack.
+-- transformer stack.  Streamly was in fact originally inspired by the
+-- concurrency implementation in @transient@ though it has no resemblance with
+-- that and takes a lazy pull approach versus transient's strict push approach.
 --
 -- The non-determinism, concurrency and streaming combination make streamly a
 -- strong FRP capable library as well. FRP is fundamentally stream of events
@@ -1041,3 +1703,10 @@ import Control.Monad.Trans.Class   (MonadTrans (lift))
 -- similar to @dunai@. dunai was designed from a FRP perspective and streamly
 -- was originally designed from a concurrency perspective. However, both have
 -- similarity at the core.
+
+-- $furtherReading
+--
+-- * Read the documentation of "Streamly" module
+-- * Read the documentation of "Streamly.Prelude" module
+-- * See the examples in the "examples" directory of the package
+-- * See the tests in the "test" directory of the package

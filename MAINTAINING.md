@@ -1,5 +1,16 @@
 # Maintainers' Guide
 
+## PR Merge Checklist
+
+* All the CI tests pass
+* New tests are added where applicable
+* Benchmarks are added where applicable
+* hlint
+* Run benchmarks locally if you suspect any regressions
+* If the PR is by someone other than you yourself then merge with a merge
+  commit, otherwise merge by rebasing on master without a separate merge
+  commit.
+
 ## Release Checklist
 
 * Check if any critical pending bugs or issues are to be included
@@ -30,6 +41,7 @@
     * Make sure all the bug fixes being included in this release are marked
       with a target release on github. So that users can search by release if
       they want.
+    * Add "Since" notations to the new APIs introduced in this release
     * Bump the package version in cabal file or package.yaml
 
 * _Upload_:
@@ -37,7 +49,7 @@
     * Wait for final CI tests to pass:
 
         * Create a git tag corresponding to the release where X.Y.Z is the new
-          package version (`git tag vX.Y.Z && git push -f origin v.X.Y.Z`).
+          package version (`git tag vX.Y.Z && git push -f origin vX.Y.Z`).
         * Mask out the build status lines from the README
         * Upload to hackage (`stack upload .`)
         * Add to stackage (`build-constraints.yaml` in Stackage repo) if needed
@@ -49,11 +61,11 @@
         * Check haddocks on Hackage, upload if not built
         * Announce to haskell-cafe@haskell.org
 
-## Managing Changes
+## Managing Issues
 
 ### User Impacting Changes
 
-__RULE__ Any commit that may affect the end user in some way MUST have either a
+__RULE__: Any commit that may affect the end user in some way MUST have either a
 changelog entry OR MUST have an issue marked with one of the following labels
 OR both.  We can have more than one of these labels on the same issue e.g.
 breaking, enhancement:
@@ -62,6 +74,7 @@ breaking, enhancement:
 * deprecating
 * enhancement
 * performance
+* usability
 * documentation
 * bug
 
@@ -76,12 +89,25 @@ changelog entry or an issue.  Issues that do not have a corresponding commit
 may be left without a label but preferably should be marked with one of the
 following:
 
-* invalid
 * question
-* wontfix
+* discussion
 * maintenance
+* testing
+* invalid
+* wontfix
 
-### Planning and Tracking Changes
+### Feature Labels
+
+For big features with many issues we can introduce a custom feature label to
+group the issues together.
+
+### Other Labels
+
+* help wanted
+* duplicate
+* deferred
+
+## Correlating Changes, Issues and Releases
 
 For planning purposes, open issues may be marked with milestones or target
 releases.  However, it may not always be known which release a fix will finally
@@ -106,7 +132,7 @@ following:
   release that affects the end user, especially bugs and breaking changes MUST
   have the target release correctly set.
 
-### Changelog Management
+## Changelog Management
 
 Keep the unreleased changes in the `Unreleased` section at the top of changelog
 file.  Using `Unreleased` instead of the next release number for unreleased
